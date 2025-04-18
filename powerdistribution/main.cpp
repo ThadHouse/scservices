@@ -3,15 +3,10 @@
 #endif
 #include <stdio.h>
 
-#include "version.h"
-
 #include <linux/can.h>
-#include <linux/can/raw.h>
-#include <net/if.h>
-#include <sys/ioctl.h>
 
-#include <wpinet/EventLoopRunner.h>
-#include <wpinet/uv/Poll.h>
+#include "version.h"
+#include "canlib.h"
 
 #include "networktables/NetworkTableInstance.h"
 #include "networktables/RawTopic.h"
@@ -36,8 +31,7 @@ struct CanState {
 
     void handleCanFrame(const canfd_frame& frame);
     void handlePowerFrame(const canfd_frame& frame);
-    bool startUvLoop(unsigned bus, const nt::NetworkTableInstance& ntInst,
-                     wpi::uv::Loop& loop);
+    void start(const nt::NetworkTableInstance& ntInst);
 };
 
 void CanState::handleCanFrame(const canfd_frame& frame) {
@@ -95,14 +89,7 @@ void CanState::handlePowerFrame(const canfd_frame& frame) {
     framePublishers[frameNum].Set(frameSpan);
 }
 
-bool CanState::startUvLoop(unsigned bus, const nt::NetworkTableInstance& ntInst,
-                           wpi::uv::Loop& loop) {
-    if (bus >= NUM_CAN_BUSES) {
-        return false;
-    }
-
-    busId = bus;
-
+void CanState::start(const nt::NetworkTableInstance& ntInst) {
     nt::PubSubOptions options;
     options.sendAll = true;
     options.keepDuplicates = true;
@@ -119,76 +106,21 @@ bool CanState::startUvLoop(unsigned bus, const nt::NetworkTableInstance& ntInst,
 
     deviceIdPublisher =
         ntInst.GetIntegerTopic("/pd/" + busIdStr + "/deviceid").Publish();
+}
 
-    socketHandle =
-        socket(PF_CAN, SOCK_RAW | SOCK_NONBLOCK | SOCK_CLOEXEC, CAN_RAW);
-
-    if (socketHandle == -1) {
-        return false;
+bool SetupPowerDistribution(std::span<CanState> states, const nt::NetworkTableInstance& inst, mrc::CanLib& canLib) {
+    for (auto&& s : states) {
+        s.start(inst);
     }
 
-    // Filter to PD device type.
-    // Both mfg types have the "4" bit set. They just
-    // differ on the 1 bit. So a single filter can be used,
-    // ignoring that bit.
-    struct can_filter filter {
-        .can_id = 0x08040000 | CAN_EFF_FLAG,
-        .can_mask = 0x1FFE0000 | CAN_EFF_FLAG,
+    mrc::MaskFilterCallback cb {
+        .mask = 0x1FFE0000 | CAN_EFF_FLAG,
+        .filter = 0x08040000 | CAN_EFF_FLAG,
+        .callback = [states](uint8_t bus, const canfd_frame frame) {
+            states[bus].handleCanFrame(frame);
+        },
     };
-
-    if (setsockopt(socketHandle, SOL_CAN_RAW, CAN_RAW_FILTER, &filter,
-                   sizeof(filter)) == -1) {
-        return false;
-    }
-
-    ifreq ifr;
-    std::snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "can%u", busId);
-
-    if (ioctl(socketHandle, SIOCGIFINDEX, &ifr) == -1) {
-        return false;
-    }
-
-    sockaddr_can addr;
-    std::memset(&addr, 0, sizeof(addr));
-    addr.can_family = AF_CAN;
-    addr.can_ifindex = ifr.ifr_ifindex;
-
-    if (bind(socketHandle, reinterpret_cast<const sockaddr*>(&addr),
-             sizeof(addr)) == -1) {
-        return false;
-    }
-
-    auto poll = wpi::uv::Poll::Create(loop, socketHandle);
-    if (!poll) {
-        return false;
-    }
-
-    poll->pollEvent.connect([this, fd = socketHandle](int mask) {
-        if (mask & UV_READABLE) {
-            canfd_frame frame;
-            int rVal = read(fd, &frame, sizeof(frame));
-
-            if (rVal != CAN_MTU && rVal != CANFD_MTU) {
-                // TODO Error handling, do we need to reopen the socket?
-                return;
-            }
-
-            if (frame.can_id & CAN_ERR_FLAG) {
-                // Do nothing if this is an error frame
-                return;
-            }
-
-            if (rVal == CANFD_MTU) {
-                frame.flags = CANFD_FDF;
-            }
-
-            handleCanFrame(frame);
-        }
-    });
-
-    poll->Start(UV_READABLE);
-
-    return true;
+    return canLib.AddCallback({&cb, 1});
 }
 
 int main() {
@@ -210,20 +142,13 @@ int main() {
     ntInst.SetServer({"localhost"}, 6810);
     ntInst.StartClient("PowerDistributionDaemon");
 
-    wpi::EventLoopRunner loopRunner;
+    mrc::CanLib canLib;
 
-    bool success = false;
-    loopRunner.ExecSync([&success, &states, &ntInst](wpi::uv::Loop& loop) {
-        for (size_t i = 0; i < states.size(); i++) {
-            success = states[i].startUvLoop(i, ntInst, loop);
-            if (!success) {
-                return;
-            }
-        }
-    });
+    if (!canLib.Init()) {
+        return -1;
+    }
 
-    if (!success) {
-        loopRunner.Stop();
+    if (!SetupPowerDistribution(states, ntInst, canLib)) {
         return -1;
     }
 
@@ -235,6 +160,7 @@ int main() {
         (void)getchar();
 #endif
     }
+    canLib.Stop();
     ntInst.StopClient();
     nt::NetworkTableInstance::Destroy(ntInst);
 
