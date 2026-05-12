@@ -34,12 +34,19 @@ struct MotorNtState {
     int64_t lastResetTime{0};
 
     void Initialize(const wpi::nt::NetworkTableInstance& instance, int motorNum,
-                    const std::string& busIdStr, wpi::nt::PubSubOptions options);
+                    const std::string& busIdStr,
+                    wpi::nt::PubSubOptions options);
 
     double lastEncoderPosition{0};
     double lastEncoderVelocity{0};
 
-    std::pair<double, int> ComputeMotorPower(double batteryVoltage);
+    struct PowerResult {
+        double power;
+        int followerIndex;
+        bool reverseFollower;
+    };
+
+    PowerResult ComputeMotorPower(double batteryVoltage);
 
     void SetEncoder(double positionRaw, double velocityRaw);
 };

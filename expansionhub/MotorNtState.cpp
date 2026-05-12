@@ -24,33 +24,56 @@ void MotorNtState::SetEncoder(double positionRaw, double velocityRaw) {
     velocityPublisher.Set(lastEncoderVelocity);
 }
 
-std::pair<double, int> MotorNtState::ComputeMotorPower(double batteryVoltage) {
+MotorNtState::PowerResult MotorNtState::ComputeMotorPower(
+    double batteryVoltage) {
     double reversed = reversedSubscriber.Get(false) ? -1.0 : 1.0;
     if (batteryVoltage == 0) {
-        return {0.0, -1};
+        return {
+            .power = 0.0,
+            .followerIndex = -1,
+            .reverseFollower = false,
+        };
     }
     double setpoint = setpointSubscriber.Get(0);
     switch (modeSubscriber.Get(PERCENTAGE_MODE)) {
         case VOLTAGE_MODE:
-            return {(setpoint / batteryVoltage) * reversed, -1};
+            return {
+                .power = (setpoint / batteryVoltage) * reversed,
+                .followerIndex = -1,
+                .reverseFollower = false,
+            };
 
         case POSITION_PID_MODE:
-            return {(positionPid.Compute(setpoint, lastEncoderPosition) /
-                     batteryVoltage) *
-                        reversed,
-                    -1};
+            return {
+                .power = (positionPid.Compute(setpoint, lastEncoderPosition) /
+                          batteryVoltage) *
+                         reversed,
+                .followerIndex = -1,
+                .reverseFollower = false,
+            };
 
         case VELOCITY_PID_MODE:
-            return {(velocityPid.Compute(setpoint, lastEncoderVelocity) /
-                     batteryVoltage) *
-                        reversed,
-                    -1};
+            return {
+                .power = (velocityPid.Compute(setpoint, lastEncoderVelocity) /
+                          batteryVoltage) *
+                         reversed,
+                .followerIndex = -1,
+                .reverseFollower = false,
+            };
 
-        case FOLLOWER_MODE:
-            return {0.0, static_cast<int>(setpoint)};
+        case FOLLOWER_MODE: {
+            int intSetpoint = static_cast<int>(setpoint);
+            return {
+                .power = 0.0,
+                .followerIndex = intSetpoint % 4,
+                .reverseFollower = intSetpoint >= 4,
+            };
+        }
 
         default:
-            return {setpoint * reversed, -1};
+            return {.power = setpoint * reversed,
+                    .followerIndex = -1,
+                    .reverseFollower = false};
     }
 }
 
