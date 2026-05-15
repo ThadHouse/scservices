@@ -112,14 +112,6 @@ void ExpansionHubState::SendInitial() {
     currentHub->Flush();
 }
 
-namespace {
-enum class FollowerResult {
-    NotFollower,
-    Follower,
-    Cycle,
-};
-}
-
 static int FindRootFollower(
     std::array<eh::MotorNtState::PowerResult, NUM_MOTORS_PER_HUB>& motorPowers,
     int index, std::array<bool, NUM_MOTORS_PER_HUB>& visited) {
