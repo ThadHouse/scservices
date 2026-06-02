@@ -99,7 +99,7 @@ endif()
 
 if (MRC_BUILD)
 install(
-    TARGETS RadioDaemon PowerDistributionDaemon ExpansionHubDaemon MotioncoreOdometryDaemon
+    TARGETS RadioDaemon PowerDistributionDaemon ExpansionHubDaemon
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
