@@ -19,14 +19,14 @@ jobs:
           - os: ubuntu-24.04
             name: Linux
             runtests: true
-            container: wpilib/ubuntu-base:24.04
+            container: wpilib/debian-base:trixie
             preset: default
             builddir: build
             flags: ""
           - os: ubuntu-24.04
             name: Linux MRC
             runtests: false
-            container: wpilib/systemcore-cross-ubuntu:2027-24.04
+            container: wpilib/systemcore-cross-debian:trixie
             builddir: buildmrc
             flags: "-DCMAKE_TOOLCHAIN_FILE=/usr/local/toolchain-config.cmake"
             preset: mrc
