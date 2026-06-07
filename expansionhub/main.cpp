@@ -112,6 +112,29 @@ void ExpansionHubState::SendInitial() {
     currentHub->Flush();
 }
 
+static int FindRootFollower(
+    std::array<eh::MotorNtState::PowerResult, NUM_MOTORS_PER_HUB>& motorPowers,
+    int index, std::array<bool, NUM_MOTORS_PER_HUB>& visited) {
+    if (visited[index]) {
+        // If cycle, do not follow anything.
+        return -1;
+    }
+
+    visited[index] = true;
+
+    if (motorPowers[index].followerIndex >= 0 &&
+        motorPowers[index].followerIndex < 4) {
+        return FindRootFollower(motorPowers, motorPowers[index].followerIndex,
+                                visited);
+    } else if (motorPowers[index].followerIndex >= 4) {
+        // If follower of something that is not a motor, don't follow anything.
+        return -1;
+    } else {
+        // If not a follower,  don't follow anything.
+        return index;
+    }
+}
+
 void ExpansionHubState::SendCommands(bool canEnable, bool deviceReset) {
     // We've unrolled these so we can control updates together to make
     // sure they happen as close as possible.
@@ -129,21 +152,34 @@ void ExpansionHubState::SendCommands(bool canEnable, bool deviceReset) {
     }
 
     // Compute motor powers
-    std::pair<double, int> motorPowers[NUM_MOTORS_PER_HUB];
+    std::array<eh::MotorNtState::PowerResult, NUM_MOTORS_PER_HUB> motorPowers;
     for (int i = 0; i < NUM_MOTORS_PER_HUB; i++) {
         motorPowers[i] =
             ntStore.motors[i].ComputeMotorPower(ntStore.lastBattery);
     }
 
+    // Detect if we have a follower following a follower, and fixup its motor
+    // powers.
+    for (int i = 0; i < NUM_MOTORS_PER_HUB; i++) {
+        std::array<bool, NUM_MOTORS_PER_HUB> visited{false};
+        if (motorPowers[i].followerIndex >= 0) {
+            motorPowers[i].followerIndex =
+                FindRootFollower(motorPowers, i, visited);
+        }
+    }
+
     // Then send the 4 motors.
     for (int i = 0; i < NUM_MOTORS_PER_HUB; i++) {
-        if (motorPowers[i].second < 0) {
-            currentHub->SendMotorConstantPower(i, motorPowers[i].first);
-        } else if (motorPowers[i].second < 4) {
-            // TODO, determine if a follower is following a follower, and what
-            // to do
-            currentHub->SendMotorConstantPower(
-                i, motorPowers[motorPowers[i].second].first);
+        if (motorPowers[i].followerIndex < 0) {
+            currentHub->SendMotorConstantPower(i, motorPowers[i].power);
+        } else if (motorPowers[i].followerIndex < 4) {
+            if (motorPowers[i].reverseFollower) {
+                currentHub->SendMotorConstantPower(
+                    i, -motorPowers[motorPowers[i].followerIndex].power);
+            } else {
+                currentHub->SendMotorConstantPower(
+                    i, motorPowers[motorPowers[i].followerIndex].power);
+            }
         } else {
             currentHub->SendMotorConstantPower(i, 0.0);
         }
