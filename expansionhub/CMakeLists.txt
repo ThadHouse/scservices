@@ -14,11 +14,15 @@ add_executable(ExpansionHubDaemon
     ExpansionHubSerial.cpp
     SystemDUsbMonitor.cpp
 )
+
+find_library(SYSTEMD REQUIRED NAMES systemd libsystemd.so.0)
+message(STATUS "Found libsystemd: ${SYSTEMD}")
+
 target_compile_features(ExpansionHubDaemon PRIVATE cxx_std_20)
 target_compile_features(ExpansionHubDaemon PRIVATE c_std_17)
 wpilib_target_warnings(ExpansionHubDaemon)
 target_link_libraries(ExpansionHubDaemon PRIVATE Common wpimath ntcore wpinet wpiutil)
-target_link_libraries(ExpansionHubDaemon PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libsystemd.so.0.37.0)
+target_link_libraries(ExpansionHubDaemon PRIVATE ${SYSTEMD})
 target_include_directories(ExpansionHubDaemon PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rhsp/include)
 
 if (MRC_BUILD)
